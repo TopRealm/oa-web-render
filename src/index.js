@@ -1,7 +1,8 @@
 const debug = false
 const user_agent = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/93.0.4577.63 Safari/537.36'
-const elements_to_disable = ['.notifications-placeholder', '.top-ads-container', '.fandom-sticky-header', 'div#WikiaBar', 'aside.page__right-rail', '.n-modal-container',
-  'div#moe-float-toc-container', 'div#moe-draw-float-button', 'div#moe-global-header', '.mys-wrapper', 'div#moe-open-in-app', 'div#age-gate']
+const elements_to_disable = ['.notifications-placeholder', '.top-ads-container', '.fandom-sticky-header', 'div#WikiaBar', 'aside.page__right-rail',
+  '.n-modal-container', 'div#moe-float-toc-container', 'div#moe-draw-float-button', 'div#moe-global-header', '.mys-wrapper',
+  'div#moe-open-in-app', 'div#age-gate', ".va-variant-prompt", ".va-variant-prompt-mobile"]
 const { resolve } = require('path')
 require('dotenv').config({ path: resolve(__dirname, '../.env') })
 const express = require('express')
@@ -58,15 +59,15 @@ async function makeScreenshot(page, el) {
       }
     });
     images.push(r)
-  let result = await mergeImg(images, { direction: true })
-  let read = await new Promise((resolve) => {
-    result.getBuffer(Jimp.MIME_JPEG, (err, buf) => resolve(buf))
-  })
-  return read
+    let result = await mergeImg(images, { direction: true })
+    let read = await new Promise((resolve) => {
+      result.getBuffer(Jimp.MIME_JPEG, (err, buf) => resolve(buf))
+    })
+    return read
   }
 }
 
-async function addCountBox(page, selected_element, endtime){
+async function addCountBox(page, selected_element, endtime) {
   return await page.evaluate((selected_element, endtime) => {
     t = document.createElement('span')
     t.className = 'bot-countbox'
@@ -125,7 +126,7 @@ app.use(require('body-parser').json({
       })
       return
     } finally {
-      if (!debug){await page.close()}
+      if (!debug) { await page.close() }
     }
   })
   app.post('/', async (req, res) => {
@@ -209,7 +210,7 @@ app.use(require('body-parser').json({
         stack: e.stack
       })
     } finally {
-      if (!debug){await page.close()}
+      if (!debug) { await page.close() }
     }
 
   })
@@ -297,7 +298,7 @@ app.use(require('body-parser').json({
         })
         return
       }
-      if (counttime == null || counttime == true){
+      if (counttime == null || counttime == true) {
         await addCountBox(page, selected_element, endtime)
       }
 
@@ -320,7 +321,7 @@ app.use(require('body-parser').json({
         stack: e.stack
       })
     } finally {
-      if (!debug){await page.close()}
+      if (!debug) { await page.close() }
     }
   })
   app.post('/section_screenshot', async (req, res) => {
@@ -361,21 +362,39 @@ app.use(require('body-parser').json({
 
       await page.evaluate((section, elements_to_disable) => {
         const levels = ['H1', 'H2', 'H3', 'H4', 'H5', 'H6']
-        const sec = document.getElementById(section).parentNode
+        let sec = document.getElementById(section).parentNode
         const sec_level = sec.tagName
+        if (sec.parentNode.className.includes('ext-discussiontools-init-section')){ // wo yi ding yao sha le ni men
+          sec = sec.parentNode
+        }
         const nbox = document.createElement('div')
         nbox.className = 'bot-sectionbox'
         nbox.style = 'display: inline-block; padding: 15px'
         nbox.appendChild(sec.cloneNode(true))
         let next_sibling = sec.nextSibling
-        while (true) {
-          if (next_sibling == null) {
-            break
-          }
+        while (next_sibling) {
           if (levels.includes(next_sibling.tagName)) {
             if (levels.indexOf(next_sibling.tagName) <= levels.indexOf(sec_level)) {
               break
             }
+          }
+          if (next_sibling.tagName == 'DIV' && next_sibling.className.includes('ext-discussiontools-init-section')) { // wo yi ding yao sha le ni men
+            let child = next_sibling.firstChild
+            let bf = false
+            while(child){
+              if (levels.includes(child.tagName)){
+                if (levels.indexOf(child.tagName) <= levels.indexOf(sec_level)){
+                  bf = true
+                  break
+                }
+              }
+              child = child.nextSibling
+            }
+            if (bf){
+              break
+            }
+            
+
           }
           nbox.appendChild(next_sibling.cloneNode(true))
           next_sibling = next_sibling.nextSibling
@@ -411,7 +430,7 @@ app.use(require('body-parser').json({
         return
       }
 
-      if (counttime == null || counttime == true){
+      if (counttime == null || counttime == true) {
         await addCountBox(page, '.bot-sectionbox', endtime)
       }
 
@@ -423,7 +442,7 @@ app.use(require('body-parser').json({
         await page.tracing.stop()
       }
 
-      
+
       res.writeHead(200, {
         'Content-Type': 'image/jpeg',
         'Content-Length': read.length,
@@ -436,7 +455,7 @@ app.use(require('body-parser').json({
         stack: e.stack
       })
     } finally {
-      if (!debug){await page.close()}
+      if (!debug) { await page.close() }
     }
   })
   app.get('/source', async (req, res) => {
@@ -459,7 +478,7 @@ app.use(require('body-parser').json({
         stack: e.stack
       })
     } finally {
-      if (!debug){await page.close()}
+      if (!debug) { await page.close() }
     }
   })
   const server = app.listen(~~process.env.FC_SERVER_PORT || 15551)
