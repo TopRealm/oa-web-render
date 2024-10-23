@@ -7,18 +7,19 @@ const { resolve } = require('path')
 require('dotenv').config({ path: resolve(__dirname, '../.env') })
 const express = require('express')
 const puppeteer = require(process.env.NODE_ENV === 'production' ? 'puppeteer' : 'puppeteer-core')
-const mergeImg = require('merge-img')
 const compression = require('compression')
-const Jimp = require('jimp')
 const fs = require('fs')
 const uuid = require('uuid')
 const cwd = process.cwd()
 const cache_path = cwd + '/cache/'
 
-if (fs.existsSync(cache_path)) {
-  fs.rmSync(cache_path, { recursive: true, force: true });
+if (debug) {
+  if (fs.existsSync(cache_path)) {
+    fs.rmSync(cache_path, { recursive: true, force: true });
+  }
+  fs.mkdirSync(cache_path)
 }
-fs.mkdirSync(cache_path)
+
 
 const custom_css = `
 span.heimu a.external, span.heimu a.external:visited, span.heimu a.extiw, span.heimu a.extiw:visited {
@@ -38,20 +39,31 @@ span.heimu a.external, span.heimu a.external:visited, span.heimu a.extiw, span.h
 
 
 async function makeScreenshot(page, el) {
+  await page.waitForNetworkIdle()
+  await page.evaluate(() => {
+    window.scroll(0, 0)
+  })
+  // await el.scrollIntoView()
   const contentSize = await el.boundingBox()
   const dpr = page.viewport().deviceScaleFactor || 1;
   const maxScreenshotHeight = Math.floor(8 * 1024 / dpr)
   const images = []
   // https://bugs.chromium.org/p/chromium/issues/detail?id=770769
   let total_content_height = contentSize.y
+  console.log('contentsize: ' + contentSize.height)
   for (let ypos = contentSize.y; ypos < contentSize.height + contentSize.y; ypos += maxScreenshotHeight) {
     total_content_height += maxScreenshotHeight
     let content_height = maxScreenshotHeight
     if (total_content_height > contentSize.height + contentSize.y) {
       content_height = contentSize.height - total_content_height + maxScreenshotHeight + contentSize.y
     }
-    let r = await el.screenshot({
-      type: 'jpeg', quality: 90, encoding: 'binary', clip: {
+    await page.evaluate((xpos, ypos) => {
+      window.scroll(xpos, ypos)
+    }, contentSize.x, ypos)
+    await page.waitForNetworkIdle()
+    console.log(contentSize.x, ypos, contentSize.width, content_height)
+    let r = await page.screenshot({
+      type: 'jpeg', quality: 90, encoding: 'base64', clip: {
         x: contentSize.x,
         y: ypos,
         width: contentSize.width,
@@ -59,12 +71,8 @@ async function makeScreenshot(page, el) {
       }
     });
     images.push(r)
-    let result = await mergeImg(images, { direction: true })
-    let read = await new Promise((resolve) => {
-      result.getBuffer(Jimp.MIME_JPEG, (err, buf) => resolve(buf))
-    })
-    return read
   }
+  return JSON.stringify(images)
 }
 
 async function addCountBox(page, selected_element, endtime) {
@@ -108,7 +116,7 @@ app.use(require('body-parser').json({
         width: 1280,
         height: 720
       })
-      await page.goto(url, { waitUntil: "networkidle2" })
+      await page.goto(url, { waitUntil: "networkidle0" })
       if (css) {
         page.addStyleTag({ 'content': css })
       }
@@ -199,7 +207,7 @@ app.use(require('body-parser').json({
       const el = await page.$(selector)
       const read = await makeScreenshot(page, el)
       res.writeHead(200, {
-        'Content-Type': 'image/jpeg',
+        'Content-Type': 'application/json',
         'Content-Length': read.length,
         'Tracing': tracing ? tracing_json : null
       });
@@ -235,10 +243,10 @@ app.use(require('body-parser').json({
         height
       })
       if (content) {
-        await page.setContent(content, { waitUntil: 'networkidle2' });
+        await page.setContent(content, { waitUntil: 'networkidle0' });
       } else if (url) {
         await page.setUserAgent(user_agent)
-        await page.goto(url, { waitUntil: "networkidle2", timeout: 0 })
+        await page.goto(url, { waitUntil: "networkidle0", timeout: 0 })
       } else {
         res.status(500).json({
           message: 'A url or content must be specified.'
@@ -310,7 +318,7 @@ app.use(require('body-parser').json({
 
       const read = await makeScreenshot(page, el)
       res.writeHead(200, {
-        'Content-Type': 'image/jpeg',
+        'Content-Type': 'application/json',
         'Content-Length': read.length,
         'Tracing': tracing ? tracing_json : null
       });
@@ -345,10 +353,10 @@ app.use(require('body-parser').json({
         height
       })
       if (content) {
-        await page.setContent(content, { waitUntil: 'networkidle2' });
+        await page.setContent(content, { waitUntil: 'networkidle0' });
       } else if (url) {
         await page.setUserAgent(user_agent)
-        await page.goto(url, { waitUntil: "networkidle2" })
+        await page.goto(url, { waitUntil: "networkidle0" })
       } else {
         res.status(500).json({
           message: 'A url or content must be specified.'
@@ -364,7 +372,7 @@ app.use(require('body-parser').json({
         const levels = ['H1', 'H2', 'H3', 'H4', 'H5', 'H6']
         let sec = document.getElementById(section).parentNode
         const sec_level = sec.tagName
-        if (sec.parentNode.className.includes('ext-discussiontools-init-section')){ // wo yi ding yao sha le ni men
+        if (sec.parentNode.className.includes('ext-discussiontools-init-section')) { // wo yi ding yao sha le ni men
           sec = sec.parentNode
         }
         const nbox = document.createElement('div')
@@ -381,19 +389,19 @@ app.use(require('body-parser').json({
           if (next_sibling.tagName == 'DIV' && next_sibling.className.includes('ext-discussiontools-init-section')) { // wo yi ding yao sha le ni men
             let child = next_sibling.firstChild
             let bf = false
-            while(child){
-              if (levels.includes(child.tagName)){
-                if (levels.indexOf(child.tagName) <= levels.indexOf(sec_level)){
+            while (child) {
+              if (levels.includes(child.tagName)) {
+                if (levels.indexOf(child.tagName) <= levels.indexOf(sec_level)) {
                   bf = true
                   break
                 }
               }
               child = child.nextSibling
             }
-            if (bf){
+            if (bf) {
               break
             }
-            
+
 
           }
           nbox.appendChild(next_sibling.cloneNode(true))
@@ -444,7 +452,7 @@ app.use(require('body-parser').json({
 
 
       res.writeHead(200, {
-        'Content-Type': 'image/jpeg',
+        'Content-Type': 'application/json',
         'Content-Length': read.length,
         'Tracing': tracing ? tracing_json : null
       });
@@ -467,7 +475,7 @@ app.use(require('body-parser').json({
         width: 1280,
         height: 720
       })
-      const r = await page.goto(url, { waitUntil: "networkidle2" })
+      const r = await page.goto(url, { waitUntil: "networkidle0" })
       if (r.headers()['content-type']) {
         res.setHeader('content-type', r.headers()['content-type'])
       }
